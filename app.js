@@ -1,47 +1,113 @@
 const express = require("express");
 const bodyParser = require("body-parser");
-const { static } = require("express");
+const mongoose = require("mongoose");
 const Date = require(__dirname + "/date.js");
+const _ = require("lodash");
 
 const app = express();
+
+app.set('view engine', 'ejs');
+
 app.use(bodyParser.urlencoded({extended: true}));
-app.set("view engine", "ejs");
 app.use(express.static("public"));
 
-const newItems = [];
-const workItems=[];
+mongoose.connect("mongodb://localhost:27017/toDoListDb", {useNewUrlParser: true, useUnifiedTopology: true });
 
-app.get("/", function(req,res){
+const itemsSchema = {
+  name: String
+};
 
-    const today = Date.getDate();
+const Item = mongoose.model("Item", itemsSchema);
 
-    res.render("list", {title : today, newList : newItems});
-})
+const listSchema = {
+  name: String,
+  items: [itemsSchema]
+};
 
-app.get("/work", function(req,res){
-    res.render("list", {title: "WorkList", newList: workItems});
-})
+const List = mongoose.model("List", listSchema);
 
-app.post("/", function(req,res){
+let today="";
+app.get("/", function(req, res) {
 
-    const newItem = req.body.item;
-    if(req.body.btn === "WorkList"){
-        workItems.push(newItem);
-        res.redirect("/work");
+    today = Date.getDate();
+    Item.find({}, function(err, foundItems){
+      res.render("list", {listTitle: today, newListItems: foundItems});
+    })
+
+});
+
+app.get("/:customListName", function(req, res){
+  const customListName = _.capitalize(req.params.customListName);
+
+  List.findOne({name: customListName}, function(err, foundList){
+    if (!err){
+      if (!foundList){
+        //Create a new list
+          const list = new List({
+          name: customListName,
+          items: []
+        });
+        list.save();
+        res.redirect("/" + customListName);
+      } else {
+        //Show an existing list
+
+        res.render("list", {listTitle: foundList.name, newListItems: foundList.items});
+      }
     }
-    else{
-        newItems.push(newItem);
+  });
+
+
+
+});
+
+app.post("/", function(req, res){
+
+  const itemName = req.body.newItem;
+  const listName = req.body.list;
+    //console.log(itemName);
+  const item = new Item({
+    name: itemName
+  });
+
+  if (listName === today){
+    item.save();
+    res.redirect("/");
+  } else {
+    List.findOne({name: listName}, function(err, foundList){
+      foundList.items.push(item);
+      foundList.save();
+      res.redirect("/" + listName);
+    });
+  }
+});
+
+app.post("/delete", function(req, res){
+  const checkedItemId = req.body.checkbox;
+  const listName = req.body.listName;
+
+  if (listName === today) {
+    Item.findByIdAndRemove(checkedItemId, function(err){
+      if (!err) {
+        console.log("Successfully deleted checked item.");
         res.redirect("/");
-    }
-    
-})
+      }
+    });
+  } else {
+    List.findOneAndUpdate({name: listName}, {$pull: {items: {_id: checkedItemId}}}, function(err, foundList){
+      if (!err){
+        res.redirect("/" + listName);
+      }
+    });
+  }
 
-app.get("/about", function(req,res){
-    res.render("About");
-})
 
+});
 
+app.get("/about", function(req, res){
+  res.render("about");
+});
 
-app.listen(3000, () => {
-    console.log("server started on port 3000");
-})
+app.listen(3000, function() {
+  console.log("Server started on port 3000");
+});
